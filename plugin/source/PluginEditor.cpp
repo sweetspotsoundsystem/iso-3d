@@ -4,10 +4,28 @@
 
 namespace audio_plugin {
 
+namespace {
+
+constexpr int kEditorWidth = 720;
+constexpr int kEditorHeight = 260;
+constexpr int kEditorMargin = 12;
+constexpr int kBoostColumnWidth = 84;
+constexpr int kKnobAreaVerticalInset = 4;
+constexpr int kMinKnobDiameter = 80;
+constexpr int kKnobSlotPadding = 8;
+constexpr int kBoostWidthMin = 54;
+constexpr int kBoostWidthMax = 64;
+constexpr int kBoostWidthInset = 8;
+constexpr int kBoostHeightMin = 106;
+constexpr int kBoostHeightMax = 122;
+constexpr int kBoostHeightFromKnobOffset = 26;
+
+}  // namespace
+
 AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
     AudioPluginAudioProcessor& p)
     : AudioProcessorEditor(&p), processorRef_(p) {
-    setSize(720, 260);
+    setSize(kEditorWidth, kEditorHeight);
     setLookAndFeel(&moogLookAndFeel_);
 
     auto setupKnob = [this](juce::Slider& slider) {
@@ -42,12 +60,13 @@ void AudioPluginAudioProcessorEditor::paint(juce::Graphics& g) {
 }
 
 void AudioPluginAudioProcessorEditor::resized() {
-    auto content = getLocalBounds().reduced(12);
-    auto boostColumn = content.removeFromRight(84);
-    auto knobArea = content.reduced(0, 4);
+    auto content = getLocalBounds().reduced(kEditorMargin);
+    auto boostColumn = content.removeFromRight(kBoostColumnWidth);
+    auto knobArea = content.reduced(0, kKnobAreaVerticalInset);
 
-    const int knobDiameter = juce::jmax(
-        80, juce::jmin(knobArea.getHeight() - 8, (knobArea.getWidth() / 3) - 8));
+    const int knobDiameter = juce::jmax(kMinKnobDiameter,
+                                        juce::jmin(knobArea.getHeight() - kKnobSlotPadding,
+                                                   (knobArea.getWidth() / 3) - kKnobSlotPadding));
     auto knobRow = knobArea.withHeight(knobDiameter);
     knobRow.setY(knobArea.getCentreY() - (knobDiameter / 2));
 
@@ -60,8 +79,10 @@ void AudioPluginAudioProcessorEditor::resized() {
     midSlider_.setBounds(midSlot.withSizeKeepingCentre(knobDiameter, knobDiameter));
     highSlider_.setBounds(highSlot.withSizeKeepingCentre(knobDiameter, knobDiameter));
 
-    const int boostWidth = juce::jlimit(54, 64, boostColumn.getWidth() - 8);
-    const int boostHeight = juce::jlimit(106, 122, knobDiameter - 26);
+    const int boostWidth =
+        juce::jlimit(kBoostWidthMin, kBoostWidthMax, boostColumn.getWidth() - kBoostWidthInset);
+    const int boostHeight = juce::jlimit(kBoostHeightMin, kBoostHeightMax,
+                                         knobDiameter - kBoostHeightFromKnobOffset);
     boostSlider_.setBounds(boostColumn.withSizeKeepingCentre(boostWidth, boostHeight));
 }
 
