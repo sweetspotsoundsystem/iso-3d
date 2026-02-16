@@ -2,6 +2,8 @@
 
 A 3-band DJ isolator audio plugin inspired by Electronique & Spectacle (E&S) and TEIL3 B&.
 
+![Iso3D Screenshot](./screenshot.png)
+
 ## Features
 
 - **3-band isolation** with crossover points at 250 Hz and 3140 Hz
