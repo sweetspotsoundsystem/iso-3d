@@ -12,7 +12,7 @@ set -e
 
 # Parse arguments
 BUILD_DIR="build"
-BUILD_TYPE="Release"
+BUILD_TYPE="Debug"
 SIGN_IDENTITY="-"  # Default to ad-hoc signing
 
 while [[ $# -gt 0 ]]; do
@@ -23,6 +23,10 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --sign-identity)
+            if [[ $# -lt 2 || -z "$2" ]]; then
+                echo "Missing value for --sign-identity" >&2
+                exit 1
+            fi
             SIGN_IDENTITY="$2"
             shift 2
             ;;
@@ -41,6 +45,12 @@ ARTEFACTS_DIR="$PROJECT_ROOT/$BUILD_DIR/plugin/AudioPlugin_artefacts/$BUILD_TYPE
 # Plugin paths
 AU_PLUGIN="$ARTEFACTS_DIR/AU/Iso3D.component"
 VST3_PLUGIN="$ARTEFACTS_DIR/VST3/Iso3D.vst3"
+
+# Fail before replacing plugins or clearing caches when no build is available.
+if [[ ! -d "$AU_PLUGIN" && ! -d "$VST3_PLUGIN" ]]; then
+    echo "No plugins found in $ARTEFACTS_DIR. Build the $BUILD_TYPE preset first." >&2
+    exit 1
+fi
 
 # System plugin directories
 AU_DEST="$HOME/Library/Audio/Plug-Ins/Components"

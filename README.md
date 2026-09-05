@@ -12,6 +12,7 @@ A 3-band DJ isolator audio plugin inspired by Electronique & Spectacle (E&S) and
 - **Configurable boost limiter** (0 dB, +6 dB, +12 dB)
 - **Click-free transitions** via EMA gain smoothing (5ms time constant)
 - **Zero latency** (pure IIR, sample-by-sample processing)
+- **Readable controls** with band labels, editable dB values, centre detents, and one-click boost limits
 - **Formats:** Standalone, VST3, AU
 
 ## MIDI Controller
@@ -40,7 +41,15 @@ cd build && ctest
 ```bash
 # Install release plugins to ~/Library/Audio/Plug-Ins/
 ./scripts/install-plugins.sh --release
+
+# Install plugins from the default Debug build
+./scripts/install-plugins.sh
 ```
+
+Drag a knob vertically to change gain, double-click it to reset to 0 dB, or click
+its value to type a gain (`KILL` gives full attenuation). Choose a maximum boost
+with the three-position 0 / +6 / +12 dB selector. If a knob is set above the selected maximum,
+the label beneath it shows the effective limit; the knob keeps its requested value.
 
 ## Parameters
 
@@ -54,12 +63,14 @@ cd build && ctest
 ## Architecture
 
 ```
-Input -> LR4(250Hz) -> LP -> Low band  -> gain -> ╲
+Input -> LR4(250Hz) -> LP -> AP(3140Hz) -> Low band -> gain -> ╲
                     -> HP -> LR4(3140Hz) -> LP -> Mid band  -> gain ->  sum -> Output
                                          -> HP -> High band -> gain -> ╱
 ```
 
-Uses JUCE's `LinkwitzRileyFilter` (TPT structure) which guarantees LP + HP = allpass (flat magnitude response).
+Uses JUCE's `LinkwitzRileyFilter` (TPT structure). The low branch includes a matching
+all-pass stage for the second split, so the three-band sum has a flat magnitude
+response at unity gain. Its phase differs from the input.
 
 ## License
 

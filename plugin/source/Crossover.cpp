@@ -15,6 +15,10 @@ void Crossover::prepare(double sampleRate) {
     midHighSplit_.setCutoffFrequency(kMidHighCrossoverHz);
     midHighSplit_.prepare(spec);
     midHighSplit_.reset();
+
+    lowPhaseCompensation_.setType(juce::dsp::LinkwitzRileyFilterType::allpass);
+    lowPhaseCompensation_.setCutoffFrequency(kMidHighCrossoverHz);
+    lowPhaseCompensation_.prepare(spec);
 }
 
 BandSamples Crossover::processSample(int channel, float input) {
@@ -26,7 +30,7 @@ BandSamples Crossover::processSample(int channel, float input) {
     float high = 0.0f;
     midHighSplit_.processSample(channel, hp1Out, mid, high);
 
-    return {low, mid, high};
+    return {lowPhaseCompensation_.processSample(channel, low), mid, high};
 }
 
 }  // namespace audio_plugin

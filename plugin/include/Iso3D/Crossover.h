@@ -18,11 +18,11 @@ struct BandSamples {
 //   LP(f) + HP(f) = allpass with unit magnitude
 //
 // Topology:
-//   Input -> LR4(lowMid) -> LP -> Low band
+//   Input -> LR4(lowMid) -> LP -> allpass(midHigh) -> Low band
 //                        -> HP -> LR4(midHigh) -> LP -> Mid band
 //                                               -> HP -> High band
 //
-// Perfect reconstruction: Low + Mid + High = Input
+// Low + Mid + High has unit magnitude, with the phase of both allpass stages.
 class Crossover {
 public:
     void prepare(double sampleRate);
@@ -34,6 +34,9 @@ private:
 
     // Crossover 2: mid/high split at 3140 Hz (applied to HP output of split 1)
     juce::dsp::LinkwitzRileyFilter<float> midHighSplit_;
+
+    // Match the phase of the second split on the low branch.
+    juce::dsp::LinkwitzRileyFilter<float> lowPhaseCompensation_;
 };
 
 }  // namespace audio_plugin
