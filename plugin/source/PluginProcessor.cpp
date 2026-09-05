@@ -74,9 +74,8 @@ void AudioPluginAudioProcessor::prepareToPlay(double sampleRate, int /*samplesPe
     crossover_.prepare(sampleRate);
 
     smoothAlpha_ = 1.0f - std::exp(-1.0f / (kGainSmoothTimeSec * static_cast<float>(sampleRate)));
-    smoothedLowGain_ = 1.0f;
-    smoothedMidGain_ = 1.0f;
-    smoothedHighGain_ = 1.0f;
+    // Hosts may restore state after prepareToPlay, before the first audio block.
+    resetGainsOnNextBlock_ = true;
 }
 
 void AudioPluginAudioProcessor::releaseResources() {}
@@ -96,15 +95,14 @@ void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear(i, 0, buffer.getNumSamples());
 
-    // Read parameters
-    float boostMaxDb = kBoostLevels[static_cast<int>(boostParam_->load())];
-    float lowDb = std::min(lowParam_->load(), boostMaxDb);
-    float midDb = std::min(midParam_->load(), boostMaxDb);
-    float highDb = std::min(highParam_->load(), boostMaxDb);
+    const auto [lowGainTarget, midGainTarget, highGainTarget] = getTargetGains();
 
-    float lowGainTarget = dbToLinear(lowDb);
-    float midGainTarget = dbToLinear(midDb);
-    float highGainTarget = dbToLinear(highDb);
+    if (resetGainsOnNextBlock_ && buffer.getNumSamples() > 0) {
+        smoothedLowGain_ = lowGainTarget;
+        smoothedMidGain_ = midGainTarget;
+        smoothedHighGain_ = highGainTarget;
+        resetGainsOnNextBlock_ = false;
+    }
 
     int numSamples = buffer.getNumSamples();
     int numChannels = std::min(static_cast<int>(totalNumInputChannels), kNumChannels);
@@ -127,6 +125,13 @@ void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             buffer.setSample(ch, s, low + mid + high);
         }
     }
+}
+
+std::array<float, kNumBands> AudioPluginAudioProcessor::getTargetGains() const {
+    const float boostMaxDb = kBoostLevels[static_cast<int>(boostParam_->load())];
+    return {dbToLinear(std::min(lowParam_->load(), boostMaxDb)),
+            dbToLinear(std::min(midParam_->load(), boostMaxDb)),
+            dbToLinear(std::min(highParam_->load(), boostMaxDb))};
 }
 
 void AudioPluginAudioProcessor::getStateInformation(juce::MemoryBlock& destData) {

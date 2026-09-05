@@ -272,38 +272,35 @@ TEST(GainTest, SilenceInSilenceOut) {
 }
 
 TEST(GainTest, GainSmoothingNoClicks) {
-    auto processor = std::make_unique<AudioPluginAudioProcessor>();
-    processor->prepareToPlay(kSampleRate, 512);
+    AudioPluginAudioProcessor processor;
+    processor.prepareToPlay(kSampleRate, 512);
 
-    constexpr float kFreq = 1000.0f;
-
-    // Process warmup at unity gain
+    // A settled DC signal isolates gain discontinuities from waveform changes.
     juce::AudioBuffer<float> warmup(2, kWarmupSamples);
-    for (int i = 0; i < kWarmupSamples; ++i) {
-        float s = generateSine(kFreq, i, kSampleRate);
-        warmup.setSample(0, i, s);
-        warmup.setSample(1, i, s);
-    }
-    processInBlocks(*processor, warmup, kWarmupSamples);
+    for (int ch = 0; ch < 2; ++ch)
+        for (int i = 0; i < warmup.getNumSamples(); ++i)
+            warmup.setSample(ch, i, 1.0f);
+    processInBlocks(processor, warmup, kWarmupSamples);
+    float previous = warmup.getSample(0, kWarmupSamples - 1);
+    EXPECT_NEAR(previous, 1.0f, 0.001f);
 
-    // Kill mid band and process more audio
-    auto* midParam = processor->getAPVTS().getParameter(ParamID::kMid);
-    midParam->setValueNotifyingHost(midParam->convertTo0to1(-100.0f));
-
-    constexpr int kPostChangeSamples = 4096;
-    juce::AudioBuffer<float> postChange(2, kPostChangeSamples);
-    for (int i = 0; i < kPostChangeSamples; ++i) {
-        float s = generateSine(kFreq, kWarmupSamples + i, kSampleRate);
-        postChange.setSample(0, i, s);
-        postChange.setSample(1, i, s);
+    for (const auto* id : {ParamID::kLow, ParamID::kMid, ParamID::kHigh}) {
+        auto* parameter = processor.getAPVTS().getParameter(id);
+        parameter->setValueNotifyingHost(parameter->convertTo0to1(-100.0f));
     }
-    processInBlocks(*processor, postChange, kPostChangeSamples);
+    juce::AudioBuffer<float> fade(2, 4096);
+    for (int ch = 0; ch < 2; ++ch)
+        for (int i = 0; i < fade.getNumSamples(); ++i)
+            fade.setSample(ch, i, 1.0f);
+    processInBlocks(processor, fade, fade.getNumSamples());
 
-    // Verify no sample exceeds the pre-change level
-    for (int i = 0; i < kPostChangeSamples; ++i) {
-        EXPECT_LE(std::abs(postChange.getSample(0, i)), 1.01f)
-            << "Click/overshoot at sample " << i << ": " << postChange.getSample(0, i);
+    EXPECT_GT(fade.getSample(0, 0), 0.9f);  // The runtime change must fade, not jump.
+    for (int i = 0; i < fade.getNumSamples(); ++i) {
+        const float current = fade.getSample(0, i);
+        EXPECT_LT(std::abs(current - previous), 0.01f);
+        previous = current;
     }
+    EXPECT_LT(std::abs(previous), 1e-5f);  // It must actually reach silence.
 }
 
 TEST(GainTest, BoostClamping) {
@@ -366,4 +363,110 @@ TEST(PluginTest, BusLayout) {
     mixedLayout.inputBuses.add(juce::AudioChannelSet::mono());
     mixedLayout.outputBuses.add(juce::AudioChannelSet::stereo());
     EXPECT_FALSE(processor->isBusesLayoutSupported(mixedLayout));
+}
+
+TEST(CrossoverTest, UnityResponseAcrossFrequenciesAndSampleRates) {
+    for (const double sampleRate : {44100.0, 48000.0, 96000.0}) {
+        for (const double frequency : {50.0, 250.0, 329.0, 500.0, 1000.0, 3140.0, 10000.0}) {
+            Crossover crossover;
+            crossover.prepare(sampleRate);
+            const int measureSamples = static_cast<int>(sampleRate);
+            double inputEnergy = 0.0;
+            double outputEnergy = 0.0;
+            for (int i = 0; i < kWarmupSamples + measureSamples; ++i) {
+                const float input = static_cast<float>(std::sin(
+                    2.0 * std::numbers::pi * frequency * static_cast<double>(i) / sampleRate));
+                const auto [low, mid, high] = crossover.processSample(0, input);
+                if (i >= kWarmupSamples) {
+                    const double output = static_cast<double>(low + mid + high);
+                    inputEnergy += static_cast<double>(input) * static_cast<double>(input);
+                    outputEnergy += output * output;
+                }
+            }
+            EXPECT_NEAR(10.0 * std::log10(outputEnergy / inputEnergy), 0.0, 0.005)
+                << "Frequency: " << frequency << ", sample rate: " << sampleRate;
+        }
+    }
+}
+
+TEST(GainTest, RestoredKillIsSilentFromFirstSample) {
+    AudioPluginAudioProcessor saved;
+    for (const auto* id : {ParamID::kLow, ParamID::kMid, ParamID::kHigh}) {
+        auto* parameter = saved.getAPVTS().getParameter(id);
+        parameter->setValueNotifyingHost(parameter->convertTo0to1(-100.0f));
+    }
+    juce::MemoryBlock state;
+    saved.getStateInformation(state);
+
+    // Both host lifecycle orders must respect the saved mute, including a zero-size block.
+    for (const bool restoreBeforePrepare : {false, true}) {
+        AudioPluginAudioProcessor processor;
+        if (restoreBeforePrepare)
+            processor.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+        processor.prepareToPlay(kSampleRate, 512);
+        juce::MidiBuffer midi;
+        juce::AudioBuffer<float> empty(2, 0);
+        processor.processBlock(empty, midi);
+        if (!restoreBeforePrepare)
+            processor.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+
+        for (int restart = 0; restart < 2; ++restart) {
+            if (restart != 0) processor.prepareToPlay(96000.0, 512);
+            juce::AudioBuffer<float> buffer(2, 512);
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < buffer.getNumSamples(); ++i)
+                    buffer.setSample(ch, i, generateSine(1000.0f, i + 12, kSampleRate));
+            processor.processBlock(buffer, midi);
+            EXPECT_FLOAT_EQ(buffer.getMagnitude(0, buffer.getNumSamples()), 0.0f);
+        }
+    }
+}
+
+TEST(GainTest, InitialGainRespectsCutsAndBoostLimit) {
+    for (const float requestedDb : {-12.0f, 12.0f}) {
+        AudioPluginAudioProcessor processor;
+        for (const auto* id : {ParamID::kLow, ParamID::kMid, ParamID::kHigh}) {
+            auto* parameter = processor.getAPVTS().getParameter(id);
+            parameter->setValueNotifyingHost(parameter->convertTo0to1(requestedDb));
+        }
+        auto* boost = processor.getAPVTS().getParameter(ParamID::kBoost);
+        boost->setValueNotifyingHost(boost->convertTo0to1(1.0f));  // +6 dB ceiling
+        processor.prepareToPlay(kSampleRate, 512);
+        juce::AudioBuffer<float> buffer(2, 512);
+        buffer.clear();
+        buffer.setSample(0, 0, 1.0f);
+        buffer.setSample(1, 0, 0.5f);
+        juce::MidiBuffer midi;
+        processor.processBlock(buffer, midi);
+
+        Crossover reference;
+        reference.prepare(kSampleRate);
+        const float expectedGain = juce::Decibels::decibelsToGain(std::min(requestedDb, 6.0f));
+        std::array<float, 512> referenceOutput{};
+        for (int i = 0; i < buffer.getNumSamples(); ++i) {
+            const auto [low, mid, high] = reference.processSample(0, i == 0 ? 1.0f : 0.0f);
+            referenceOutput[static_cast<size_t>(i)] = low + mid + high;
+        }
+        const float referenceRms = rmsLevel(referenceOutput.data(), buffer.getNumSamples());
+        EXPECT_NEAR(rmsLevel(buffer.getReadPointer(0), buffer.getNumSamples()) / referenceRms,
+                    expectedGain, 1e-5f);
+        EXPECT_NEAR(rmsLevel(buffer.getReadPointer(1), buffer.getNumSamples()) / referenceRms,
+                    expectedGain * 0.5f, 1e-5f);
+    }
+}
+
+TEST(PluginTest, ParameterStateRoundTrip) {
+    AudioPluginAudioProcessor original;
+    const std::array<const char*, 4> ids{ParamID::kLow, ParamID::kMid, ParamID::kHigh, ParamID::kBoost};
+    const std::array<float, 4> values{-31.4f, 6.3f, -100.0f, 2.0f};
+    for (size_t i = 0; i < ids.size(); ++i) {
+        auto* parameter = original.getAPVTS().getParameter(ids[i]);
+        parameter->setValueNotifyingHost(parameter->convertTo0to1(values[i]));
+    }
+    juce::MemoryBlock state;
+    original.getStateInformation(state);
+    AudioPluginAudioProcessor restored;
+    restored.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+    for (size_t i = 0; i < ids.size(); ++i)
+        EXPECT_NEAR(restored.getAPVTS().getRawParameterValue(ids[i])->load(), values[i], 0.001f);
 }

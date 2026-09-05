@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "Constants.h"
@@ -40,6 +42,7 @@ public:
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     static BusesProperties createBusesProperties();
+    std::array<float, kNumBands> getTargetGains() const;
 
     juce::AudioProcessorValueTreeState apvts_;
 
@@ -58,6 +61,7 @@ private:
 
     // Smoothing coefficient, computed in prepareToPlay
     float smoothAlpha_ = 1.0f;
+    bool resetGainsOnNextBlock_ = true;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPluginAudioProcessor)
 };
